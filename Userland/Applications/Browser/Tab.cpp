@@ -14,6 +14,7 @@
 #include "Browser.h"
 #include "BrowserWindow.h"
 #include "DownloadWidget.h"
+#include "FindInPageWidget.h"
 #include "History/HistoryWidget.h"
 #include "InspectorWidget.h"
 #include "StorageWidget.h"
@@ -114,6 +115,23 @@ Tab::Tab(BrowserWindow& window)
 
     m_icon = g_icon_bag.default_favicon;
 
+    m_find_in_page_widget = *find_descendant_of_type_named<FindInPageWidget>("find_in_page_widget");
+    m_find_in_page_widget->on_close = [this]() {
+        m_find_in_page_widget->set_visible(false);
+    };
+
+    m_find_in_page_widget->on_search = [this](String const& search_text) {
+        m_web_content_view->find_in_page(search_text, m_find_in_page_widget->is_match_case_enabled() ? AK::CaseSensitivity::CaseSensitive : AK::CaseSensitivity::CaseInsensitive);
+    };
+
+    m_find_in_page_widget->on_next = [this]() {
+        m_web_content_view->find_in_page_next_match();
+    };
+
+    m_find_in_page_widget->on_previous = [this]() {
+        m_web_content_view->find_in_page_previous_match();
+    };
+
     m_toolbar_container = *find_descendant_of_type_named<GUI::ToolbarContainer>("toolbar_container");
     auto& toolbar = *find_descendant_of_type_named<GUI::Toolbar>("toolbar");
 
@@ -123,6 +141,10 @@ Tab::Tab(BrowserWindow& window)
 
     auto preferred_color_scheme = Web::CSS::preferred_color_scheme_from_string(Config::read_string("Browser"sv, "Preferences"sv, "ColorScheme"sv, Browser::default_color_scheme));
     m_web_content_view->set_preferred_color_scheme(preferred_color_scheme);
+
+    m_web_content_view->on_find_in_page = [this](size_t current_match_index, Optional<size_t> const& total_match_count) {
+        m_find_in_page_widget->update_result_label(current_match_index, total_match_count);
+    };
 
     content_filters_changed();
     autoplay_allowlist_changed();
@@ -1058,6 +1080,12 @@ void Tab::enable_webdriver_mode()
     m_web_content_view->connect_to_webdriver(Browser::g_webdriver_content_ipc_path);
     auto& webdriver_banner = *find_descendant_of_type_named<GUI::Widget>("webdriver_banner");
     webdriver_banner.set_visible(true);
+}
+
+void Tab::show_find_in_page()
+{
+    m_find_in_page_widget->set_visible(true);
+    m_find_in_page_widget->set_focus(true);
 }
 
 }
