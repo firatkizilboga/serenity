@@ -119,7 +119,7 @@ void FindInPageWidget::show(String const& global_term)
 
     m_search_textbox->select_all();
     set_visible(true);
-    set_focus(true);
+    m_search_textbox->set_focus(true);
 }
 
 void FindInPageWidget::keydown_event(GUI::KeyEvent& event)
