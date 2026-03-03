@@ -5,7 +5,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include <Kernel/API/spawn.h>
+#include <Kernel/API/Spawn.h>
 #include <Kernel/Debug.h>
 #include <Kernel/Devices/BaseDevices.h>
 #include <Kernel/Devices/Device.h>

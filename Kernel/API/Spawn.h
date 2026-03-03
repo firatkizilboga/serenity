@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <AK/Array.h>
 #include <AK/StdLibExtras.h>
 #include <AK/Types.h>
 #include <Kernel/API/POSIX/sys/types.h>
@@ -27,14 +28,14 @@ struct SpawnFileActionHeader {
 
 struct SpawnFileActionDup2 {
     SpawnFileActionHeader header;
-    i32 old_fd;
-    i32 new_fd;
+    int old_fd;
+    int new_fd;
 };
 
 struct SpawnFileActionOpen {
     SpawnFileActionHeader header;
-    i32 fd;
-    i32 flags;
+    int fd;
+    int flags;
     mode_t mode;
     u16 path_length;
     char path[];
@@ -42,7 +43,7 @@ struct SpawnFileActionOpen {
 
 struct SpawnFileActionClose {
     SpawnFileActionHeader header;
-    i32 fd;
+    int fd;
 };
 
 struct SpawnFileActionChdir {
@@ -53,12 +54,18 @@ struct SpawnFileActionChdir {
 
 struct SpawnFileActionFchdir {
     SpawnFileActionHeader header;
-    i32 fd;
+    int fd;
 };
 
-inline constexpr size_t SPAWN_FILE_ACTION_ALIGNMENT = max(
-    max(alignof(SpawnFileActionHeader), alignof(SpawnFileActionDup2)),
-    max(max(alignof(SpawnFileActionOpen), alignof(SpawnFileActionClose)),
-        max(alignof(SpawnFileActionChdir), alignof(SpawnFileActionFchdir))));
+union SpawnFileActionUnion {
+    SpawnFileActionHeader header;
+    SpawnFileActionDup2 dup2;
+    SpawnFileActionOpen open;
+    SpawnFileActionClose close;
+    SpawnFileActionChdir chdir;
+    SpawnFileActionFchdir fchdir;
+};
+
+constexpr size_t SPAWN_FILE_ACTION_ALIGNMENT = alignof(SpawnFileActionUnion);
 
 }
