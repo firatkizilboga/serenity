@@ -41,25 +41,7 @@ ErrorOr<void> Process::execute_file_actions(ReadonlyBytes file_actions_data)
                 return EINVAL;
 
             auto const* action = reinterpret_cast<SpawnFileActionDup2 const*>(header);
-            TRY(m_fds.with_exclusive([&](auto& fds) -> ErrorOr<void> {
-                if (action->new_fd < 0 || static_cast<size_t>(action->new_fd) >= fds.max_open())
-                    return EINVAL;
-
-                auto description = TRY(fds.open_file_description(action->old_fd));
-                if (action->old_fd != action->new_fd) {
-
-                    if (fds.m_fds_metadatas[action->new_fd].is_allocated()) {
-                        if (auto* old_description = fds[action->new_fd].description())
-                            (void)old_description->close();
-                        fds[action->new_fd].clear();
-                    } else {
-                        fds.m_fds_metadatas[action->new_fd].allocate();
-                    }
-
-                    fds[action->new_fd].set(move(description));
-                }
-                return {};
-            }));
+            TRY(dup2_impl(action->old_fd, action->new_fd));
             break;
         }
         case SpawnFileActionType::Close: {

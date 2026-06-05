@@ -754,6 +754,7 @@ private:
 
     ErrorOr<FlatPtr> open_impl(Userspace<Syscall::SC_open_params const*>);
     ErrorOr<FlatPtr> close_impl(int fd);
+    ErrorOr<FlatPtr> dup2_impl(int old_fd, int new_fd);
     ErrorOr<void> execute_file_actions(ReadonlyBytes file_actions_data);
     ErrorOr<FlatPtr> read_impl(int fd, Userspace<u8*> buffer, size_t size);
     ErrorOr<FlatPtr> pread_impl(int fd, Userspace<u8*>, size_t, off_t);
