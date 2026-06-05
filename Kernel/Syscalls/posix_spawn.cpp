@@ -37,7 +37,7 @@ ErrorOr<void> Process::execute_file_actions(ReadonlyBytes file_actions_data)
 
         switch (header->type) {
         case SpawnFileActionType::Dup2: {
-            if (header->record_length < sizeof(SpawnFileActionDup2))
+            if (header->record_length != sizeof(SpawnFileActionDup2))
                 return EINVAL;
 
             auto const* action = reinterpret_cast<SpawnFileActionDup2 const*>(header);
@@ -45,7 +45,7 @@ ErrorOr<void> Process::execute_file_actions(ReadonlyBytes file_actions_data)
             break;
         }
         case SpawnFileActionType::Close: {
-            if (header->record_length < sizeof(SpawnFileActionClose))
+            if (header->record_length != sizeof(SpawnFileActionClose))
                 return EINVAL;
 
             auto const* action = reinterpret_cast<SpawnFileActionClose const*>(header);
@@ -65,7 +65,6 @@ ErrorOr<void> Process::execute_file_actions(ReadonlyBytes file_actions_data)
             TRY(open_at_fd_impl(action->fd, AT_FDCWD, path->view(), action->flags, action->mode));
             break;
         }
-
         case SpawnFileActionType::Chdir: {
             if (header->record_length < sizeof(SpawnFileActionChdir))
                 return EINVAL;
@@ -80,7 +79,7 @@ ErrorOr<void> Process::execute_file_actions(ReadonlyBytes file_actions_data)
             break;
         }
         case SpawnFileActionType::Fchdir: {
-            if (header->record_length < sizeof(SpawnFileActionFchdir))
+            if (header->record_length != sizeof(SpawnFileActionFchdir))
                 return EINVAL;
 
             auto const* action = reinterpret_cast<SpawnFileActionFchdir const*>(header);
