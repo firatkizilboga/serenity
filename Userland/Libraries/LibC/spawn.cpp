@@ -120,7 +120,8 @@ extern "C" {
             }
             case SpawnFileActionType::Open: {
                 auto const* action = reinterpret_cast<SpawnFileActionOpen const*>(header);
-                int opened_fd = open(action->path, action->flags, action->mode);
+                auto path = reinterpret_cast<char const*>(action + 1);
+                int opened_fd = open(path, action->flags, action->mode);
                 if (opened_fd < 0) {
                     perror("posix_spawn open");
                     _exit(127);
@@ -136,7 +137,8 @@ extern "C" {
             }
             case SpawnFileActionType::Chdir: {
                 auto const* action = reinterpret_cast<SpawnFileActionChdir const*>(header);
-                if (chdir(action->path) < 0) {
+                auto path = reinterpret_cast<char const*>(action + 1);
+                if (chdir(path) < 0) {
                     perror("posix_spawn chdir");
                     _exit(127);
                 }
@@ -293,7 +295,7 @@ int posix_spawn_file_actions_addchdir(posix_spawn_file_actions_t* actions, char 
     action->header.type = SpawnFileActionType::Chdir;
     action->header.record_length = record_size;
     action->path_length = path_len;
-    memcpy(action->path, path, path_len + 1);
+    memcpy(action + 1, path, path_len + 1);
 
     if (actions->state->buffer.try_append(record_buffer.data(), record_size).is_error())
         return ENOMEM;
@@ -360,7 +362,7 @@ int posix_spawn_file_actions_addopen(posix_spawn_file_actions_t* actions, int wa
     action->flags = flags;
     action->mode = mode;
     action->path_length = path_len;
-    memcpy(action->path, path, path_len + 1);
+    memcpy(action + 1, path, path_len + 1);
 
     if (actions->state->buffer.try_append(record_buffer.data(), record_size).is_error())
         return ENOMEM;

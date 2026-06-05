@@ -42,36 +42,43 @@ static ByteString read_file_content(char const* path)
     return ByteString::copy(content_or_error.value());
 }
 
-static posix_spawnattr_t* get_attr_for_path(bool use_slow_path, posix_spawnattr_t& attr)
+enum class UseSyscall {
+    No,
+    Yes,
+};
+
+static posix_spawnattr_t* spawnattr_for_syscall_mode(UseSyscall use_syscall, posix_spawnattr_t& attr)
 {
-    if (!use_slow_path)
+    if (use_syscall == UseSyscall::Yes)
         return nullptr;
+
+    // FIXME: Stop testing this non-syscall fallback once spawn attributes are supported by the posix_spawn syscall.
     posix_spawnattr_init(&attr);
     posix_spawnattr_setflags(&attr, 0);
     return &attr;
 }
 
-static void cleanup_attr(bool use_slow_path, posix_spawnattr_t& attr)
+static void cleanup_attr_for_syscall_mode(UseSyscall use_syscall, posix_spawnattr_t& attr)
 {
-    if (use_slow_path)
+    if (use_syscall == UseSyscall::No)
         posix_spawnattr_destroy(&attr);
 }
 
-static void test_spawn_without_file_actions_impl(bool use_slow_path)
+static void test_spawn_without_file_actions_impl(UseSyscall use_syscall)
 {
     posix_spawnattr_t attr;
-    auto* attr_ptr = get_attr_for_path(use_slow_path, attr);
+    auto* attr_ptr = spawnattr_for_syscall_mode(use_syscall, attr);
 
     char* argv[] = { const_cast<char*>("/bin/true"), nullptr };
     spawn_and_wait(nullptr, attr_ptr, "/bin/true"sv, argv, 0);
 
-    cleanup_attr(use_slow_path, attr);
+    cleanup_attr_for_syscall_mode(use_syscall, attr);
 }
 
-static void test_addopen_redirect_stdout_impl(bool use_slow_path)
+static void test_addopen_redirect_stdout_impl(UseSyscall use_syscall)
 {
     posix_spawnattr_t attr;
-    auto* attr_ptr = get_attr_for_path(use_slow_path, attr);
+    auto* attr_ptr = spawnattr_for_syscall_mode(use_syscall, attr);
 
     char path[] = "/tmp/spawn_test_XXXXXX";
     int fd = mkstemp(path);
@@ -90,13 +97,13 @@ static void test_addopen_redirect_stdout_impl(bool use_slow_path)
 
     posix_spawn_file_actions_destroy(&actions);
     unlink(path);
-    cleanup_attr(use_slow_path, attr);
+    cleanup_attr_for_syscall_mode(use_syscall, attr);
 }
 
-static void test_addopen_redirect_stdin_impl(bool use_slow_path)
+static void test_addopen_redirect_stdin_impl(UseSyscall use_syscall)
 {
     posix_spawnattr_t attr;
-    auto* attr_ptr = get_attr_for_path(use_slow_path, attr);
+    auto* attr_ptr = spawnattr_for_syscall_mode(use_syscall, attr);
 
     char path[] = "/tmp/spawn_test_in_XXXXXX";
     int fd = mkstemp(path);
@@ -123,13 +130,13 @@ static void test_addopen_redirect_stdin_impl(bool use_slow_path)
     posix_spawn_file_actions_destroy(&actions);
     unlink(path);
     unlink(out_path);
-    cleanup_attr(use_slow_path, attr);
+    cleanup_attr_for_syscall_mode(use_syscall, attr);
 }
 
-static void test_adddup2_impl(bool use_slow_path)
+static void test_adddup2_impl(UseSyscall use_syscall)
 {
     posix_spawnattr_t attr;
-    auto* attr_ptr = get_attr_for_path(use_slow_path, attr);
+    auto* attr_ptr = spawnattr_for_syscall_mode(use_syscall, attr);
 
     char path[] = "/tmp/spawn_dup2_XXXXXX";
     int fd = mkstemp(path);
@@ -148,13 +155,13 @@ static void test_adddup2_impl(bool use_slow_path)
 
     posix_spawn_file_actions_destroy(&actions);
     unlink(path);
-    cleanup_attr(use_slow_path, attr);
+    cleanup_attr_for_syscall_mode(use_syscall, attr);
 }
 
-static void test_adddup2_same_fd_impl(bool use_slow_path)
+static void test_adddup2_same_fd_impl(UseSyscall use_syscall)
 {
     posix_spawnattr_t attr;
-    auto* attr_ptr = get_attr_for_path(use_slow_path, attr);
+    auto* attr_ptr = spawnattr_for_syscall_mode(use_syscall, attr);
 
     posix_spawn_file_actions_t actions;
     EXPECT_EQ(posix_spawn_file_actions_init(&actions), 0);
@@ -164,13 +171,13 @@ static void test_adddup2_same_fd_impl(bool use_slow_path)
     spawn_and_wait(&actions, attr_ptr, "/bin/true"sv, argv, 0);
 
     posix_spawn_file_actions_destroy(&actions);
-    cleanup_attr(use_slow_path, attr);
+    cleanup_attr_for_syscall_mode(use_syscall, attr);
 }
 
-static void test_addclose_stdin_impl(bool use_slow_path)
+static void test_addclose_stdin_impl(UseSyscall use_syscall)
 {
     posix_spawnattr_t attr;
-    auto* attr_ptr = get_attr_for_path(use_slow_path, attr);
+    auto* attr_ptr = spawnattr_for_syscall_mode(use_syscall, attr);
 
     posix_spawn_file_actions_t actions;
     EXPECT_EQ(posix_spawn_file_actions_init(&actions), 0);
@@ -180,13 +187,13 @@ static void test_addclose_stdin_impl(bool use_slow_path)
     spawn_and_wait(&actions, attr_ptr, "/bin/true"sv, argv, 0);
 
     posix_spawn_file_actions_destroy(&actions);
-    cleanup_attr(use_slow_path, attr);
+    cleanup_attr_for_syscall_mode(use_syscall, attr);
 }
 
-static void test_addchdir_impl(bool use_slow_path)
+static void test_addchdir_impl(UseSyscall use_syscall)
 {
     posix_spawnattr_t attr;
-    auto* attr_ptr = get_attr_for_path(use_slow_path, attr);
+    auto* attr_ptr = spawnattr_for_syscall_mode(use_syscall, attr);
 
     char out_path[] = "/tmp/spawn_cwd_XXXXXX";
     int fd = mkstemp(out_path);
@@ -205,13 +212,13 @@ static void test_addchdir_impl(bool use_slow_path)
 
     posix_spawn_file_actions_destroy(&actions);
     unlink(out_path);
-    cleanup_attr(use_slow_path, attr);
+    cleanup_attr_for_syscall_mode(use_syscall, attr);
 }
 
-static void test_addfchdir_impl(bool use_slow_path)
+static void test_addfchdir_impl(UseSyscall use_syscall)
 {
     posix_spawnattr_t attr;
-    auto* attr_ptr = get_attr_for_path(use_slow_path, attr);
+    auto* attr_ptr = spawnattr_for_syscall_mode(use_syscall, attr);
 
     int dir_fd = open("/tmp", O_RDONLY | O_DIRECTORY);
     EXPECT(dir_fd >= 0);
@@ -234,13 +241,13 @@ static void test_addfchdir_impl(bool use_slow_path)
     posix_spawn_file_actions_destroy(&actions);
     close(dir_fd);
     unlink(out_path);
-    cleanup_attr(use_slow_path, attr);
+    cleanup_attr_for_syscall_mode(use_syscall, attr);
 }
 
-static void test_multiple_actions_impl(bool use_slow_path)
+static void test_multiple_actions_impl(UseSyscall use_syscall)
 {
     posix_spawnattr_t attr;
-    auto* attr_ptr = get_attr_for_path(use_slow_path, attr);
+    auto* attr_ptr = spawnattr_for_syscall_mode(use_syscall, attr);
 
     char path[] = "/tmp/spawn_seq_XXXXXX";
     int dummy = mkstemp(path);
@@ -262,13 +269,13 @@ static void test_multiple_actions_impl(bool use_slow_path)
 
     posix_spawn_file_actions_destroy(&actions);
     unlink(path);
-    cleanup_attr(use_slow_path, attr);
+    cleanup_attr_for_syscall_mode(use_syscall, attr);
 }
 
-static void test_high_fd_impl(bool use_slow_path)
+static void test_high_fd_impl(UseSyscall use_syscall)
 {
     posix_spawnattr_t attr;
-    auto* attr_ptr = get_attr_for_path(use_slow_path, attr);
+    auto* attr_ptr = spawnattr_for_syscall_mode(use_syscall, attr);
 
     char path[] = "/tmp/spawn_highfd_XXXXXX";
     int dummy = mkstemp(path);
@@ -289,13 +296,13 @@ static void test_high_fd_impl(bool use_slow_path)
 
     posix_spawn_file_actions_destroy(&actions);
     unlink(path);
-    cleanup_attr(use_slow_path, attr);
+    cleanup_attr_for_syscall_mode(use_syscall, attr);
 }
 
-static void test_parent_unchanged_impl(bool use_slow_path)
+static void test_parent_unchanged_impl(UseSyscall use_syscall)
 {
     posix_spawnattr_t attr;
-    auto* attr_ptr = get_attr_for_path(use_slow_path, attr);
+    auto* attr_ptr = spawnattr_for_syscall_mode(use_syscall, attr);
 
     int start_fds = 0;
     for (int i = 0; i < 1024; ++i) {
@@ -319,13 +326,13 @@ static void test_parent_unchanged_impl(bool use_slow_path)
     }
     EXPECT_EQ(start_fds, end_fds);
 
-    cleanup_attr(use_slow_path, attr);
+    cleanup_attr_for_syscall_mode(use_syscall, attr);
 }
 
-static void test_parent_cwd_unchanged_impl(bool use_slow_path)
+static void test_parent_cwd_unchanged_impl(UseSyscall use_syscall)
 {
     posix_spawnattr_t attr;
-    auto* attr_ptr = get_attr_for_path(use_slow_path, attr);
+    auto* attr_ptr = spawnattr_for_syscall_mode(use_syscall, attr);
 
     char original_cwd[PATH_MAX];
     EXPECT(getcwd(original_cwd, sizeof(original_cwd)) != nullptr);
@@ -342,34 +349,34 @@ static void test_parent_cwd_unchanged_impl(bool use_slow_path)
     EXPECT(getcwd(new_cwd, sizeof(new_cwd)) != nullptr);
     EXPECT_EQ(strcmp(original_cwd, new_cwd), 0);
 
-    cleanup_attr(use_slow_path, attr);
+    cleanup_attr_for_syscall_mode(use_syscall, attr);
 }
 
-TEST_CASE(fast_spawn_without_file_actions) { test_spawn_without_file_actions_impl(false); }
-TEST_CASE(fast_addopen_redirect_stdout) { test_addopen_redirect_stdout_impl(false); }
-TEST_CASE(fast_addopen_redirect_stdin) { test_addopen_redirect_stdin_impl(false); }
-TEST_CASE(fast_adddup2) { test_adddup2_impl(false); }
-TEST_CASE(fast_adddup2_same_fd) { test_adddup2_same_fd_impl(false); }
-TEST_CASE(fast_addclose_stdin) { test_addclose_stdin_impl(false); }
-TEST_CASE(fast_addchdir) { test_addchdir_impl(false); }
-TEST_CASE(fast_addfchdir) { test_addfchdir_impl(false); }
-TEST_CASE(fast_multiple_actions) { test_multiple_actions_impl(false); }
-TEST_CASE(fast_high_fd) { test_high_fd_impl(false); }
-TEST_CASE(fast_parent_unchanged) { test_parent_unchanged_impl(false); }
-TEST_CASE(fast_parent_cwd_unchanged) { test_parent_cwd_unchanged_impl(false); }
+TEST_CASE(fast_spawn_without_file_actions) { test_spawn_without_file_actions_impl(UseSyscall::Yes); }
+TEST_CASE(fast_addopen_redirect_stdout) { test_addopen_redirect_stdout_impl(UseSyscall::Yes); }
+TEST_CASE(fast_addopen_redirect_stdin) { test_addopen_redirect_stdin_impl(UseSyscall::Yes); }
+TEST_CASE(fast_adddup2) { test_adddup2_impl(UseSyscall::Yes); }
+TEST_CASE(fast_adddup2_same_fd) { test_adddup2_same_fd_impl(UseSyscall::Yes); }
+TEST_CASE(fast_addclose_stdin) { test_addclose_stdin_impl(UseSyscall::Yes); }
+TEST_CASE(fast_addchdir) { test_addchdir_impl(UseSyscall::Yes); }
+TEST_CASE(fast_addfchdir) { test_addfchdir_impl(UseSyscall::Yes); }
+TEST_CASE(fast_multiple_actions) { test_multiple_actions_impl(UseSyscall::Yes); }
+TEST_CASE(fast_high_fd) { test_high_fd_impl(UseSyscall::Yes); }
+TEST_CASE(fast_parent_unchanged) { test_parent_unchanged_impl(UseSyscall::Yes); }
+TEST_CASE(fast_parent_cwd_unchanged) { test_parent_cwd_unchanged_impl(UseSyscall::Yes); }
 
-TEST_CASE(slow_spawn_without_file_actions) { test_spawn_without_file_actions_impl(true); }
-TEST_CASE(slow_addopen_redirect_stdout) { test_addopen_redirect_stdout_impl(true); }
-TEST_CASE(slow_addopen_redirect_stdin) { test_addopen_redirect_stdin_impl(true); }
-TEST_CASE(slow_adddup2) { test_adddup2_impl(true); }
-TEST_CASE(slow_adddup2_same_fd) { test_adddup2_same_fd_impl(true); }
-TEST_CASE(slow_addclose_stdin) { test_addclose_stdin_impl(true); }
-TEST_CASE(slow_addchdir) { test_addchdir_impl(true); }
-TEST_CASE(slow_addfchdir) { test_addfchdir_impl(true); }
-TEST_CASE(slow_multiple_actions) { test_multiple_actions_impl(true); }
-TEST_CASE(slow_high_fd) { test_high_fd_impl(true); }
-TEST_CASE(slow_parent_unchanged) { test_parent_unchanged_impl(true); }
-TEST_CASE(slow_parent_cwd_unchanged) { test_parent_cwd_unchanged_impl(true); }
+TEST_CASE(slow_spawn_without_file_actions) { test_spawn_without_file_actions_impl(UseSyscall::No); }
+TEST_CASE(slow_addopen_redirect_stdout) { test_addopen_redirect_stdout_impl(UseSyscall::No); }
+TEST_CASE(slow_addopen_redirect_stdin) { test_addopen_redirect_stdin_impl(UseSyscall::No); }
+TEST_CASE(slow_adddup2) { test_adddup2_impl(UseSyscall::No); }
+TEST_CASE(slow_adddup2_same_fd) { test_adddup2_same_fd_impl(UseSyscall::No); }
+TEST_CASE(slow_addclose_stdin) { test_addclose_stdin_impl(UseSyscall::No); }
+TEST_CASE(slow_addchdir) { test_addchdir_impl(UseSyscall::No); }
+TEST_CASE(slow_addfchdir) { test_addfchdir_impl(UseSyscall::No); }
+TEST_CASE(slow_multiple_actions) { test_multiple_actions_impl(UseSyscall::No); }
+TEST_CASE(slow_high_fd) { test_high_fd_impl(UseSyscall::No); }
+TEST_CASE(slow_parent_unchanged) { test_parent_unchanged_impl(UseSyscall::No); }
+TEST_CASE(slow_parent_cwd_unchanged) { test_parent_cwd_unchanged_impl(UseSyscall::No); }
 
 TEST_CASE(error_enoent_for_missing_file)
 {

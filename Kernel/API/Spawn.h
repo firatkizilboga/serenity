@@ -38,7 +38,6 @@ struct SpawnFileActionOpen {
     int flags;
     mode_t mode;
     u16 path_length;
-    char path[];
 };
 
 struct SpawnFileActionClose {
@@ -49,7 +48,6 @@ struct SpawnFileActionClose {
 struct SpawnFileActionChdir {
     SpawnFileActionHeader header;
     u16 path_length;
-    char path[];
 };
 
 struct SpawnFileActionFchdir {

@@ -83,7 +83,8 @@ ErrorOr<void> Process::execute_file_actions(ReadonlyBytes file_actions_data)
             if (header->record_length < sizeof(SpawnFileActionOpen) + action->path_length)
                 return EINVAL;
 
-            auto path = TRY(KString::try_create(StringView { action->path, action->path_length }));
+            auto path_data = reinterpret_cast<char const*>(action + 1);
+            auto path = TRY(KString::try_create(StringView { path_data, action->path_length }));
             CustodyBase base(AT_FDCWD, path->view());
             auto description = TRY(VirtualFileSystem::open(
                 vfs_root_context(), credentials(), path->view(),
@@ -119,7 +120,8 @@ ErrorOr<void> Process::execute_file_actions(ReadonlyBytes file_actions_data)
             if (header->record_length < sizeof(SpawnFileActionChdir) + action->path_length)
                 return EINVAL;
 
-            auto path = TRY(KString::try_create(StringView { action->path, action->path_length }));
+            auto path_data = reinterpret_cast<char const*>(action + 1);
+            auto path = TRY(KString::try_create(StringView { path_data, action->path_length }));
             auto new_directory = TRY(VirtualFileSystem::open_directory(
                 vfs_root_context(), credentials(), path->view(), current_directory()));
             m_current_directory.with([&](auto& current_directory) {
