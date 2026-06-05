@@ -208,7 +208,7 @@ static void test_addchdir_impl(UseSyscall use_syscall)
     spawn_and_wait(&actions, attr_ptr, "/bin/pwd"sv, argv, 0);
 
     auto content = read_file_content(out_path);
-    EXPECT(content.trim_whitespace() == "/tmp" || content.trim_whitespace() == "/private/tmp");
+    EXPECT_EQ(content.trim_whitespace(), "/tmp");
 
     posix_spawn_file_actions_destroy(&actions);
     unlink(out_path);
@@ -236,7 +236,7 @@ static void test_addfchdir_impl(UseSyscall use_syscall)
     spawn_and_wait(&actions, attr_ptr, "/bin/pwd"sv, argv, 0);
 
     auto content = read_file_content(out_path);
-    EXPECT(content.trim_whitespace() == "/tmp" || content.trim_whitespace() == "/private/tmp");
+    EXPECT_EQ(content.trim_whitespace(), "/tmp");
 
     posix_spawn_file_actions_destroy(&actions);
     close(dir_fd);
