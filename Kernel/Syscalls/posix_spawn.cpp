@@ -5,6 +5,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/MemoryStream.h>
 #include <Kernel/API/Spawn.h>
 #include <Kernel/Debug.h>
 #include <Kernel/Devices/BaseDevices.h>
@@ -29,68 +30,72 @@ ErrorOr<void> Process::execute_file_actions(ReadonlyBytes file_actions_data)
         if (offset + sizeof(SpawnFileActionHeader) > file_actions_data.size())
             return EINVAL;
 
-        auto const* header = reinterpret_cast<SpawnFileActionHeader const*>(file_actions_data.data() + offset);
-        if (header->record_length < sizeof(SpawnFileActionHeader))
+        FixedMemoryStream header_stream { file_actions_data.slice(offset) };
+        auto header = TRY(header_stream.read_value<SpawnFileActionHeader>());
+        if (header.record_length < sizeof(SpawnFileActionHeader))
             return EINVAL;
-        if (offset + header->record_length > file_actions_data.size())
+        if (offset + header.record_length > file_actions_data.size())
             return EINVAL;
 
-        switch (header->type) {
+        auto record_bytes = file_actions_data.slice(offset, header.record_length);
+        FixedMemoryStream record_stream { record_bytes };
+
+        switch (header.type) {
         case SpawnFileActionType::Dup2: {
-            if (header->record_length != sizeof(SpawnFileActionDup2))
+            if (header.record_length != sizeof(SpawnFileActionDup2))
                 return EINVAL;
 
-            auto const* action = reinterpret_cast<SpawnFileActionDup2 const*>(header);
-            TRY(dup2_impl(action->old_fd, action->new_fd));
+            auto action = TRY(record_stream.read_value<SpawnFileActionDup2>());
+            TRY(dup2_impl(action.old_fd, action.new_fd));
             break;
         }
         case SpawnFileActionType::Close: {
-            if (header->record_length != sizeof(SpawnFileActionClose))
+            if (header.record_length != sizeof(SpawnFileActionClose))
                 return EINVAL;
 
-            auto const* action = reinterpret_cast<SpawnFileActionClose const*>(header);
-            TRY(close_fd_impl(action->fd));
+            auto action = TRY(record_stream.read_value<SpawnFileActionClose>());
+            TRY(close_fd_impl(action.fd));
             break;
         }
         case SpawnFileActionType::Open: {
-            if (header->record_length < sizeof(SpawnFileActionOpen))
+            if (header.record_length < sizeof(SpawnFileActionOpen))
                 return EINVAL;
 
-            auto const* action = reinterpret_cast<SpawnFileActionOpen const*>(header);
-            if (header->record_length < sizeof(SpawnFileActionOpen) + action->path_length)
+            auto action = TRY(record_stream.read_value<SpawnFileActionOpen>());
+            if (header.record_length < sizeof(SpawnFileActionOpen) + action.path_length)
                 return EINVAL;
 
-            auto path_data = reinterpret_cast<char const*>(action + 1);
-            auto path = TRY(KString::try_create(StringView { path_data, action->path_length }));
-            TRY(open_at_fd_impl(action->fd, AT_FDCWD, path->view(), action->flags, action->mode));
+            auto path_bytes = record_bytes.slice(sizeof(SpawnFileActionOpen), action.path_length);
+            auto path = TRY(KString::try_create(StringView { path_bytes }));
+            TRY(open_at_fd_impl(action.fd, AT_FDCWD, path->view(), action.flags, action.mode));
             break;
         }
         case SpawnFileActionType::Chdir: {
-            if (header->record_length < sizeof(SpawnFileActionChdir))
+            if (header.record_length < sizeof(SpawnFileActionChdir))
                 return EINVAL;
 
-            auto const* action = reinterpret_cast<SpawnFileActionChdir const*>(header);
-            if (header->record_length < sizeof(SpawnFileActionChdir) + action->path_length)
+            auto action = TRY(record_stream.read_value<SpawnFileActionChdir>());
+            if (header.record_length < sizeof(SpawnFileActionChdir) + action.path_length)
                 return EINVAL;
 
-            auto path_data = reinterpret_cast<char const*>(action + 1);
-            auto path = TRY(KString::try_create(StringView { path_data, action->path_length }));
+            auto path_bytes = record_bytes.slice(sizeof(SpawnFileActionChdir), action.path_length);
+            auto path = TRY(KString::try_create(StringView { path_bytes }));
             TRY(chdir_impl(path->view()));
             break;
         }
         case SpawnFileActionType::Fchdir: {
-            if (header->record_length != sizeof(SpawnFileActionFchdir))
+            if (header.record_length != sizeof(SpawnFileActionFchdir))
                 return EINVAL;
 
-            auto const* action = reinterpret_cast<SpawnFileActionFchdir const*>(header);
-            TRY(fchdir_impl(action->fd));
+            auto action = TRY(record_stream.read_value<SpawnFileActionFchdir>());
+            TRY(fchdir_impl(action.fd));
             break;
         }
         default:
             return EINVAL;
         }
 
-        offset += header->record_length;
+        offset += header.record_length;
     }
     return {};
 }

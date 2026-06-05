@@ -14,8 +14,9 @@
 #include <spawn.h>
 
 #include <AK/ByteBuffer.h>
+#include <AK/MemoryStream.h>
 #include <AK/Vector.h>
-#include <Kernel/API/spawn.h>
+#include <Kernel/API/Spawn.h>
 #include <LibFileSystem/FileSystem.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -93,40 +94,67 @@ extern "C" {
         size_t offset = 0;
 
         while (offset < buffer.size()) {
-            if (offset + sizeof(Kernel::SpawnFileActionHeader) > buffer.size())
+            ReadonlyBytes remaining_bytes { buffer.data() + offset, buffer.size() - offset };
+            FixedMemoryStream header_stream { remaining_bytes };
+            auto header_or_error = header_stream.read_value<Kernel::SpawnFileActionHeader>();
+            if (header_or_error.is_error())
                 _exit(127);
 
-            auto const* header = reinterpret_cast<Kernel::SpawnFileActionHeader const*>(buffer.data() + offset);
-            if (header->record_length < sizeof(Kernel::SpawnFileActionHeader) || offset + header->record_length > buffer.size())
+            auto header = header_or_error.release_value();
+            if (header.record_length < sizeof(Kernel::SpawnFileActionHeader) || offset + header.record_length > buffer.size())
                 _exit(127);
 
-            switch (header->type) {
+            ReadonlyBytes record_bytes { buffer.data() + offset, header.record_length };
+            FixedMemoryStream record_stream { record_bytes };
+
+            switch (header.type) {
             case Kernel::SpawnFileActionType::Dup2: {
-                auto const* action = reinterpret_cast<Kernel::SpawnFileActionDup2 const*>(header);
-                if (dup2(action->old_fd, action->new_fd) < 0) {
+                if (header.record_length != sizeof(Kernel::SpawnFileActionDup2))
+                    _exit(127);
+
+                auto action_or_error = record_stream.read_value<Kernel::SpawnFileActionDup2>();
+                if (action_or_error.is_error())
+                    _exit(127);
+                auto action = action_or_error.release_value();
+                if (dup2(action.old_fd, action.new_fd) < 0) {
                     perror("posix_spawn dup2");
                     _exit(127);
                 }
                 break;
             }
             case Kernel::SpawnFileActionType::Close: {
-                auto const* action = reinterpret_cast<Kernel::SpawnFileActionClose const*>(header);
-                if (close(action->fd) < 0) {
+                if (header.record_length != sizeof(Kernel::SpawnFileActionClose))
+                    _exit(127);
+
+                auto action_or_error = record_stream.read_value<Kernel::SpawnFileActionClose>();
+                if (action_or_error.is_error())
+                    _exit(127);
+                auto action = action_or_error.release_value();
+                if (close(action.fd) < 0) {
                     perror("posix_spawn close");
                     _exit(127);
                 }
                 break;
             }
             case Kernel::SpawnFileActionType::Open: {
-                auto const* action = reinterpret_cast<Kernel::SpawnFileActionOpen const*>(header);
-                auto path = reinterpret_cast<char const*>(action + 1);
-                int opened_fd = open(path, action->flags, action->mode);
+                if (header.record_length < sizeof(Kernel::SpawnFileActionOpen))
+                    _exit(127);
+
+                auto action_or_error = record_stream.read_value<Kernel::SpawnFileActionOpen>();
+                if (action_or_error.is_error())
+                    _exit(127);
+                auto action = action_or_error.release_value();
+                if (header.record_length < sizeof(Kernel::SpawnFileActionOpen) + action.path_length + 1)
+                    _exit(127);
+
+                auto path = reinterpret_cast<char const*>(record_bytes.data() + sizeof(Kernel::SpawnFileActionOpen));
+                int opened_fd = open(path, action.flags, action.mode);
                 if (opened_fd < 0) {
                     perror("posix_spawn open");
                     _exit(127);
                 }
-                if (opened_fd != action->fd) {
-                    if (dup2(opened_fd, action->fd) < 0) {
+                if (opened_fd != action.fd) {
+                    if (dup2(opened_fd, action.fd) < 0) {
                         perror("posix_spawn dup2 after open");
                         _exit(127);
                     }
@@ -135,8 +163,17 @@ extern "C" {
                 break;
             }
             case Kernel::SpawnFileActionType::Chdir: {
-                auto const* action = reinterpret_cast<Kernel::SpawnFileActionChdir const*>(header);
-                auto path = reinterpret_cast<char const*>(action + 1);
+                if (header.record_length < sizeof(Kernel::SpawnFileActionChdir))
+                    _exit(127);
+
+                auto action_or_error = record_stream.read_value<Kernel::SpawnFileActionChdir>();
+                if (action_or_error.is_error())
+                    _exit(127);
+                auto action = action_or_error.release_value();
+                if (header.record_length < sizeof(Kernel::SpawnFileActionChdir) + action.path_length + 1)
+                    _exit(127);
+
+                auto path = reinterpret_cast<char const*>(record_bytes.data() + sizeof(Kernel::SpawnFileActionChdir));
                 if (chdir(path) < 0) {
                     perror("posix_spawn chdir");
                     _exit(127);
@@ -144,8 +181,14 @@ extern "C" {
                 break;
             }
             case Kernel::SpawnFileActionType::Fchdir: {
-                auto const* action = reinterpret_cast<Kernel::SpawnFileActionFchdir const*>(header);
-                if (fchdir(action->fd) < 0) {
+                if (header.record_length != sizeof(Kernel::SpawnFileActionFchdir))
+                    _exit(127);
+
+                auto action_or_error = record_stream.read_value<Kernel::SpawnFileActionFchdir>();
+                if (action_or_error.is_error())
+                    _exit(127);
+                auto action = action_or_error.release_value();
+                if (fchdir(action.fd) < 0) {
                     perror("posix_spawn fchdir");
                     _exit(127);
                 }
@@ -155,7 +198,7 @@ extern "C" {
                 _exit(127);
             }
 
-            offset += header->record_length;
+            offset += header.record_length;
         }
     }
 
@@ -288,12 +331,16 @@ int posix_spawn_file_actions_addchdir(posix_spawn_file_actions_t* actions, char 
     if (buffer_or_error.is_error())
         return ENOMEM;
     auto record_buffer = buffer_or_error.release_value();
+    FixedMemoryStream record_stream { record_buffer.bytes() };
 
-    auto* action = reinterpret_cast<Kernel::SpawnFileActionChdir*>(record_buffer.data());
-    action->header.type = Kernel::SpawnFileActionType::Chdir;
-    action->header.record_length = record_size;
-    action->path_length = path_len;
-    memcpy(action + 1, path, path_len + 1);
+    Kernel::SpawnFileActionChdir action {};
+    action.header.type = Kernel::SpawnFileActionType::Chdir;
+    action.header.record_length = record_size;
+    action.path_length = path_len;
+    if (record_stream.write_value(action).is_error())
+        return ENOMEM;
+    if (record_stream.write_until_depleted({ reinterpret_cast<u8 const*>(path), path_len + 1 }).is_error())
+        return ENOMEM;
 
     if (actions->state->buffer.try_append(record_buffer.data(), record_size).is_error())
         return ENOMEM;
@@ -302,11 +349,19 @@ int posix_spawn_file_actions_addchdir(posix_spawn_file_actions_t* actions, char 
 
 int posix_spawn_file_actions_addfchdir(posix_spawn_file_actions_t* actions, int fd)
 {
-    Kernel::SpawnFileActionFchdir action;
+    Kernel::SpawnFileActionFchdir action {};
     action.header.type = Kernel::SpawnFileActionType::Fchdir;
     action.header.record_length = sizeof(Kernel::SpawnFileActionFchdir);
     action.fd = fd;
-    if (actions->state->buffer.try_append(&action, sizeof(action)).is_error())
+    auto buffer_or_error = ByteBuffer::create_uninitialized(sizeof(action));
+    if (buffer_or_error.is_error())
+        return ENOMEM;
+    auto record_buffer = buffer_or_error.release_value();
+    FixedMemoryStream record_stream { record_buffer.bytes() };
+    if (record_stream.write_value(action).is_error())
+        return ENOMEM;
+
+    if (actions->state->buffer.try_append(record_buffer.data(), record_buffer.size()).is_error())
         return ENOMEM;
     return 0;
 }
@@ -314,11 +369,19 @@ int posix_spawn_file_actions_addfchdir(posix_spawn_file_actions_t* actions, int 
 // https://pubs.opengroup.org/onlinepubs/9699919799/functions/posix_spawn_file_actions_addclose.html
 int posix_spawn_file_actions_addclose(posix_spawn_file_actions_t* actions, int fd)
 {
-    Kernel::SpawnFileActionClose action;
+    Kernel::SpawnFileActionClose action {};
     action.header.type = Kernel::SpawnFileActionType::Close;
     action.header.record_length = sizeof(Kernel::SpawnFileActionClose);
     action.fd = fd;
-    if (actions->state->buffer.try_append(&action, sizeof(action)).is_error())
+    auto buffer_or_error = ByteBuffer::create_uninitialized(sizeof(action));
+    if (buffer_or_error.is_error())
+        return ENOMEM;
+    auto record_buffer = buffer_or_error.release_value();
+    FixedMemoryStream record_stream { record_buffer.bytes() };
+    if (record_stream.write_value(action).is_error())
+        return ENOMEM;
+
+    if (actions->state->buffer.try_append(record_buffer.data(), record_buffer.size()).is_error())
         return ENOMEM;
     return 0;
 }
@@ -326,12 +389,20 @@ int posix_spawn_file_actions_addclose(posix_spawn_file_actions_t* actions, int f
 // https://pubs.opengroup.org/onlinepubs/9699919799/functions/posix_spawn_file_actions_adddup2.html
 int posix_spawn_file_actions_adddup2(posix_spawn_file_actions_t* actions, int old_fd, int new_fd)
 {
-    Kernel::SpawnFileActionDup2 action;
+    Kernel::SpawnFileActionDup2 action {};
     action.header.type = Kernel::SpawnFileActionType::Dup2;
     action.header.record_length = sizeof(Kernel::SpawnFileActionDup2);
     action.old_fd = old_fd;
     action.new_fd = new_fd;
-    if (actions->state->buffer.try_append(&action, sizeof(action)).is_error())
+    auto buffer_or_error = ByteBuffer::create_uninitialized(sizeof(action));
+    if (buffer_or_error.is_error())
+        return ENOMEM;
+    auto record_buffer = buffer_or_error.release_value();
+    FixedMemoryStream record_stream { record_buffer.bytes() };
+    if (record_stream.write_value(action).is_error())
+        return ENOMEM;
+
+    if (actions->state->buffer.try_append(record_buffer.data(), record_buffer.size()).is_error())
         return ENOMEM;
     return 0;
 }
@@ -348,15 +419,19 @@ int posix_spawn_file_actions_addopen(posix_spawn_file_actions_t* actions, int wa
     if (buffer_or_error.is_error())
         return ENOMEM;
     auto record_buffer = buffer_or_error.release_value();
+    FixedMemoryStream record_stream { record_buffer.bytes() };
 
-    auto* action = reinterpret_cast<Kernel::SpawnFileActionOpen*>(record_buffer.data());
-    action->header.type = Kernel::SpawnFileActionType::Open;
-    action->header.record_length = record_size;
-    action->fd = want_fd;
-    action->flags = flags;
-    action->mode = mode;
-    action->path_length = path_len;
-    memcpy(action + 1, path, path_len + 1);
+    Kernel::SpawnFileActionOpen action {};
+    action.header.type = Kernel::SpawnFileActionType::Open;
+    action.header.record_length = record_size;
+    action.fd = want_fd;
+    action.flags = flags;
+    action.mode = mode;
+    action.path_length = path_len;
+    if (record_stream.write_value(action).is_error())
+        return ENOMEM;
+    if (record_stream.write_until_depleted({ reinterpret_cast<u8 const*>(path), path_len + 1 }).is_error())
+        return ENOMEM;
 
     if (actions->state->buffer.try_append(record_buffer.data(), record_size).is_error())
         return ENOMEM;
