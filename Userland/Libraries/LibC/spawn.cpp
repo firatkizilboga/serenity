@@ -89,37 +89,36 @@ extern "C" {
     }
 
     if (file_actions && !file_actions->state->buffer.is_empty()) {
-        using namespace Kernel;
         auto const& buffer = file_actions->state->buffer;
         size_t offset = 0;
 
         while (offset < buffer.size()) {
-            if (offset + sizeof(SpawnFileActionHeader) > buffer.size())
+            if (offset + sizeof(Kernel::SpawnFileActionHeader) > buffer.size())
                 _exit(127);
 
-            auto const* header = reinterpret_cast<SpawnFileActionHeader const*>(buffer.data() + offset);
-            if (header->record_length < sizeof(SpawnFileActionHeader) || offset + header->record_length > buffer.size())
+            auto const* header = reinterpret_cast<Kernel::SpawnFileActionHeader const*>(buffer.data() + offset);
+            if (header->record_length < sizeof(Kernel::SpawnFileActionHeader) || offset + header->record_length > buffer.size())
                 _exit(127);
 
             switch (header->type) {
-            case SpawnFileActionType::Dup2: {
-                auto const* action = reinterpret_cast<SpawnFileActionDup2 const*>(header);
+            case Kernel::SpawnFileActionType::Dup2: {
+                auto const* action = reinterpret_cast<Kernel::SpawnFileActionDup2 const*>(header);
                 if (dup2(action->old_fd, action->new_fd) < 0) {
                     perror("posix_spawn dup2");
                     _exit(127);
                 }
                 break;
             }
-            case SpawnFileActionType::Close: {
-                auto const* action = reinterpret_cast<SpawnFileActionClose const*>(header);
+            case Kernel::SpawnFileActionType::Close: {
+                auto const* action = reinterpret_cast<Kernel::SpawnFileActionClose const*>(header);
                 if (close(action->fd) < 0) {
                     perror("posix_spawn close");
                     _exit(127);
                 }
                 break;
             }
-            case SpawnFileActionType::Open: {
-                auto const* action = reinterpret_cast<SpawnFileActionOpen const*>(header);
+            case Kernel::SpawnFileActionType::Open: {
+                auto const* action = reinterpret_cast<Kernel::SpawnFileActionOpen const*>(header);
                 auto path = reinterpret_cast<char const*>(action + 1);
                 int opened_fd = open(path, action->flags, action->mode);
                 if (opened_fd < 0) {
@@ -135,8 +134,8 @@ extern "C" {
                 }
                 break;
             }
-            case SpawnFileActionType::Chdir: {
-                auto const* action = reinterpret_cast<SpawnFileActionChdir const*>(header);
+            case Kernel::SpawnFileActionType::Chdir: {
+                auto const* action = reinterpret_cast<Kernel::SpawnFileActionChdir const*>(header);
                 auto path = reinterpret_cast<char const*>(action + 1);
                 if (chdir(path) < 0) {
                     perror("posix_spawn chdir");
@@ -144,8 +143,8 @@ extern "C" {
                 }
                 break;
             }
-            case SpawnFileActionType::Fchdir: {
-                auto const* action = reinterpret_cast<SpawnFileActionFchdir const*>(header);
+            case Kernel::SpawnFileActionType::Fchdir: {
+                auto const* action = reinterpret_cast<Kernel::SpawnFileActionFchdir const*>(header);
                 if (fchdir(action->fd) < 0) {
                     perror("posix_spawn fchdir");
                     _exit(127);
@@ -280,19 +279,18 @@ int posix_spawnp(pid_t* out_pid, char const* file, posix_spawn_file_actions_t co
 // https://pubs.opengroup.org/onlinepubs/9699919799/functions/posix_spawn_file_actions_addchdir.html
 int posix_spawn_file_actions_addchdir(posix_spawn_file_actions_t* actions, char const* path)
 {
-    using namespace Kernel;
     size_t path_len = strlen(path);
-    size_t record_size = sizeof(SpawnFileActionChdir) + path_len + 1;
+    size_t record_size = sizeof(Kernel::SpawnFileActionChdir) + path_len + 1;
 
-    record_size = align_up_to(record_size, SPAWN_FILE_ACTION_ALIGNMENT);
+    record_size = align_up_to(record_size, Kernel::SPAWN_FILE_ACTION_ALIGNMENT);
 
     auto buffer_or_error = ByteBuffer::create_uninitialized(record_size);
     if (buffer_or_error.is_error())
         return ENOMEM;
     auto record_buffer = buffer_or_error.release_value();
 
-    auto* action = reinterpret_cast<SpawnFileActionChdir*>(record_buffer.data());
-    action->header.type = SpawnFileActionType::Chdir;
+    auto* action = reinterpret_cast<Kernel::SpawnFileActionChdir*>(record_buffer.data());
+    action->header.type = Kernel::SpawnFileActionType::Chdir;
     action->header.record_length = record_size;
     action->path_length = path_len;
     memcpy(action + 1, path, path_len + 1);
@@ -304,10 +302,9 @@ int posix_spawn_file_actions_addchdir(posix_spawn_file_actions_t* actions, char 
 
 int posix_spawn_file_actions_addfchdir(posix_spawn_file_actions_t* actions, int fd)
 {
-    using namespace Kernel;
-    SpawnFileActionFchdir action;
-    action.header.type = SpawnFileActionType::Fchdir;
-    action.header.record_length = sizeof(SpawnFileActionFchdir);
+    Kernel::SpawnFileActionFchdir action;
+    action.header.type = Kernel::SpawnFileActionType::Fchdir;
+    action.header.record_length = sizeof(Kernel::SpawnFileActionFchdir);
     action.fd = fd;
     if (actions->state->buffer.try_append(&action, sizeof(action)).is_error())
         return ENOMEM;
@@ -317,10 +314,9 @@ int posix_spawn_file_actions_addfchdir(posix_spawn_file_actions_t* actions, int 
 // https://pubs.opengroup.org/onlinepubs/9699919799/functions/posix_spawn_file_actions_addclose.html
 int posix_spawn_file_actions_addclose(posix_spawn_file_actions_t* actions, int fd)
 {
-    using namespace Kernel;
-    SpawnFileActionClose action;
-    action.header.type = SpawnFileActionType::Close;
-    action.header.record_length = sizeof(SpawnFileActionClose);
+    Kernel::SpawnFileActionClose action;
+    action.header.type = Kernel::SpawnFileActionType::Close;
+    action.header.record_length = sizeof(Kernel::SpawnFileActionClose);
     action.fd = fd;
     if (actions->state->buffer.try_append(&action, sizeof(action)).is_error())
         return ENOMEM;
@@ -330,10 +326,9 @@ int posix_spawn_file_actions_addclose(posix_spawn_file_actions_t* actions, int f
 // https://pubs.opengroup.org/onlinepubs/9699919799/functions/posix_spawn_file_actions_adddup2.html
 int posix_spawn_file_actions_adddup2(posix_spawn_file_actions_t* actions, int old_fd, int new_fd)
 {
-    using namespace Kernel;
-    SpawnFileActionDup2 action;
-    action.header.type = SpawnFileActionType::Dup2;
-    action.header.record_length = sizeof(SpawnFileActionDup2);
+    Kernel::SpawnFileActionDup2 action;
+    action.header.type = Kernel::SpawnFileActionType::Dup2;
+    action.header.record_length = sizeof(Kernel::SpawnFileActionDup2);
     action.old_fd = old_fd;
     action.new_fd = new_fd;
     if (actions->state->buffer.try_append(&action, sizeof(action)).is_error())
@@ -344,19 +339,18 @@ int posix_spawn_file_actions_adddup2(posix_spawn_file_actions_t* actions, int ol
 // https://pubs.opengroup.org/onlinepubs/9699919799/functions/posix_spawn_file_actions_addopen.html
 int posix_spawn_file_actions_addopen(posix_spawn_file_actions_t* actions, int want_fd, char const* path, int flags, mode_t mode)
 {
-    using namespace Kernel;
     size_t path_len = strlen(path);
-    size_t record_size = sizeof(SpawnFileActionOpen) + path_len + 1;
+    size_t record_size = sizeof(Kernel::SpawnFileActionOpen) + path_len + 1;
 
-    record_size = align_up_to(record_size, SPAWN_FILE_ACTION_ALIGNMENT);
+    record_size = align_up_to(record_size, Kernel::SPAWN_FILE_ACTION_ALIGNMENT);
 
     auto buffer_or_error = ByteBuffer::create_uninitialized(record_size);
     if (buffer_or_error.is_error())
         return ENOMEM;
     auto record_buffer = buffer_or_error.release_value();
 
-    auto* action = reinterpret_cast<SpawnFileActionOpen*>(record_buffer.data());
-    action->header.type = SpawnFileActionType::Open;
+    auto* action = reinterpret_cast<Kernel::SpawnFileActionOpen*>(record_buffer.data());
+    action->header.type = Kernel::SpawnFileActionType::Open;
     action->header.record_length = record_size;
     action->fd = want_fd;
     action->flags = flags;
