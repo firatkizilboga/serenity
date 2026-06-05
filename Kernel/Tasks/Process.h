@@ -752,9 +752,15 @@ private:
 
     ErrorOr<Memory::VirtualRange> remap_range_as_stack(FlatPtr address, size_t size);
 
+    ErrorOr<NonnullRefPtr<OpenFileDescription>> open_file_description_for_path_impl(int dirfd, StringView path, int options, mode_t mode);
     ErrorOr<FlatPtr> open_impl(Userspace<Syscall::SC_open_params const*>);
+    ErrorOr<FlatPtr> open_impl(int dirfd, StringView path, int options, mode_t mode);
+    ErrorOr<FlatPtr> open_at_fd_impl(int fd, int dirfd, StringView path, int options, mode_t mode);
+    ErrorOr<FlatPtr> close_fd_impl(int fd);
     ErrorOr<FlatPtr> close_impl(int fd);
     ErrorOr<FlatPtr> dup2_impl(int old_fd, int new_fd);
+    ErrorOr<FlatPtr> chdir_impl(StringView path);
+    ErrorOr<FlatPtr> fchdir_impl(int fd);
     ErrorOr<void> execute_file_actions(ReadonlyBytes file_actions_data);
     ErrorOr<FlatPtr> read_impl(int fd, Userspace<u8*> buffer, size_t size);
     ErrorOr<FlatPtr> pread_impl(int fd, Userspace<u8*>, size_t, off_t);

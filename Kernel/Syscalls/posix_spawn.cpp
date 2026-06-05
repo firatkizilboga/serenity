@@ -49,12 +49,7 @@ ErrorOr<void> Process::execute_file_actions(ReadonlyBytes file_actions_data)
                 return EINVAL;
 
             auto const* action = reinterpret_cast<SpawnFileActionClose const*>(header);
-            TRY(m_fds.with_exclusive([&](auto& fds) -> ErrorOr<void> {
-                auto description = TRY(fds.open_file_description(action->fd));
-                TRY(description->close());
-                fds[action->fd].clear();
-                return {};
-            }));
+            TRY(close_fd_impl(action->fd));
             break;
         }
         case SpawnFileActionType::Open: {
@@ -67,30 +62,7 @@ ErrorOr<void> Process::execute_file_actions(ReadonlyBytes file_actions_data)
 
             auto path_data = reinterpret_cast<char const*>(action + 1);
             auto path = TRY(KString::try_create(StringView { path_data, action->path_length }));
-            CustodyBase base(AT_FDCWD, path->view());
-            auto description = TRY(VirtualFileSystem::open(
-                vfs_root_context(), credentials(), path->view(),
-                action->flags, action->mode & ~umask(), base));
-
-            if (description->inode() && description->inode()->bound_socket())
-                return ENXIO;
-
-            TRY(m_fds.with_exclusive([&](auto& fds) -> ErrorOr<void> {
-                if (action->fd < 0 || static_cast<size_t>(action->fd) >= fds.max_open())
-                    return EINVAL;
-
-                if (fds.m_fds_metadatas[action->fd].is_allocated()) {
-                    if (auto* old_description = fds[action->fd].description())
-                        (void)old_description->close();
-                    fds[action->fd].clear();
-                } else {
-                    fds.m_fds_metadatas[action->fd].allocate();
-                }
-
-                u32 fd_flags = (action->flags & O_CLOEXEC) ? FD_CLOEXEC : 0;
-                fds[action->fd].set(move(description), fd_flags);
-                return {};
-            }));
+            TRY(open_at_fd_impl(action->fd, AT_FDCWD, path->view(), action->flags, action->mode));
             break;
         }
 
@@ -104,11 +76,7 @@ ErrorOr<void> Process::execute_file_actions(ReadonlyBytes file_actions_data)
 
             auto path_data = reinterpret_cast<char const*>(action + 1);
             auto path = TRY(KString::try_create(StringView { path_data, action->path_length }));
-            auto new_directory = TRY(VirtualFileSystem::open_directory(
-                vfs_root_context(), credentials(), path->view(), current_directory()));
-            m_current_directory.with([&](auto& current_directory) {
-                current_directory = move(new_directory);
-            });
+            TRY(chdir_impl(path->view()));
             break;
         }
         case SpawnFileActionType::Fchdir: {
@@ -116,17 +84,7 @@ ErrorOr<void> Process::execute_file_actions(ReadonlyBytes file_actions_data)
                 return EINVAL;
 
             auto const* action = reinterpret_cast<SpawnFileActionFchdir const*>(header);
-            auto description = TRY(open_file_description(action->fd));
-            if (!description->is_directory())
-                return ENOTDIR;
-
-            // Check for search (+x) permission on the directory.
-            if (!description->metadata().may_execute(credentials()))
-                return EACCES;
-
-            m_current_directory.with([&](auto& current_directory) {
-                current_directory = description->custody();
-            });
+            TRY(fchdir_impl(action->fd));
             break;
         }
         default:

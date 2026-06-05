@@ -14,6 +14,53 @@
 
 namespace Kernel {
 
+ErrorOr<NonnullRefPtr<OpenFileDescription>> Process::open_file_description_for_path_impl(int dirfd, StringView path, int options, mode_t mode)
+{
+    CustodyBase base(dirfd, path);
+    auto description = TRY(VirtualFileSystem::open(vfs_root_context(), credentials(), path, options, mode & ~umask(), base));
+
+    if (description->inode() && description->inode()->bound_socket())
+        return ENXIO;
+
+    return description;
+}
+
+ErrorOr<FlatPtr> Process::open_impl(int dirfd, StringView path, int options, mode_t mode)
+{
+    dbgln_if(IO_DEBUG, "sys$open(dirfd={}, path='{}', options={}, mode={})", dirfd, path, options, mode);
+
+    auto fd_allocation = TRY(allocate_fd());
+    auto description = TRY(open_file_description_for_path_impl(dirfd, path, options, mode));
+
+    return m_fds.with_exclusive([&](auto& fds) -> ErrorOr<FlatPtr> {
+        u32 fd_flags = (options & O_CLOEXEC) ? FD_CLOEXEC : 0;
+        fds[fd_allocation.fd].set(move(description), fd_flags);
+        return fd_allocation.fd;
+    });
+}
+
+ErrorOr<FlatPtr> Process::open_at_fd_impl(int fd, int dirfd, StringView path, int options, mode_t mode)
+{
+    auto description = TRY(open_file_description_for_path_impl(dirfd, path, options, mode));
+
+    return m_fds.with_exclusive([&](auto& fds) -> ErrorOr<FlatPtr> {
+        if (fd < 0 || static_cast<size_t>(fd) >= fds.max_open())
+            return EINVAL;
+
+        if (fds.m_fds_metadatas[fd].is_allocated()) {
+            if (auto* old_description = fds[fd].description())
+                (void)old_description->close();
+            fds[fd].clear();
+        } else {
+            fds.m_fds_metadatas[fd].allocate();
+        }
+
+        u32 fd_flags = (options & O_CLOEXEC) ? FD_CLOEXEC : 0;
+        fds[fd].set(move(description), fd_flags);
+        return fd;
+    });
+}
+
 ErrorOr<FlatPtr> Process::open_impl(Userspace<Syscall::SC_open_params const*> user_params)
 {
     VERIFY_NO_PROCESS_BIG_LOCK(this);
@@ -52,32 +99,24 @@ ErrorOr<FlatPtr> Process::open_impl(Userspace<Syscall::SC_open_params const*> us
     // Ignore everything except permission bits.
     mode &= 0777;
 
-    dbgln_if(IO_DEBUG, "sys$open(dirfd={}, path='{}', options={}, mode={})", dirfd, path->view(), options, mode);
-
-    auto fd_allocation = TRY(allocate_fd());
-    CustodyBase base(dirfd, path->view());
-    auto description = TRY(VirtualFileSystem::open(vfs_root_context(), credentials(), path->view(), options, mode & ~umask(), base));
-
-    if (description->inode() && description->inode()->bound_socket())
-        return ENXIO;
-
-    return m_fds.with_exclusive([&](auto& fds) -> ErrorOr<FlatPtr> {
-        u32 fd_flags = (options & O_CLOEXEC) ? FD_CLOEXEC : 0;
-        fds[fd_allocation.fd].set(move(description), fd_flags);
-        return fd_allocation.fd;
-    });
+    return open_impl(dirfd, path->view(), options, mode);
 }
 
-ErrorOr<FlatPtr> Process::close_impl(int fd)
+ErrorOr<FlatPtr> Process::close_fd_impl(int fd)
 {
-    VERIFY_NO_PROCESS_BIG_LOCK(this);
-    TRY(require_promise(Pledge::stdio));
     auto description = TRY(open_file_description(fd));
     auto result = description->close();
     m_fds.with_exclusive([fd](auto& fds) { fds[fd] = {}; });
     if (result.is_error())
         return result.release_error();
     return 0;
+}
+
+ErrorOr<FlatPtr> Process::close_impl(int fd)
+{
+    VERIFY_NO_PROCESS_BIG_LOCK(this);
+    TRY(require_promise(Pledge::stdio));
+    return close_fd_impl(fd);
 }
 
 }

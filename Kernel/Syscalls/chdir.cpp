@@ -11,13 +11,9 @@
 
 namespace Kernel {
 
-ErrorOr<FlatPtr> Process::sys$chdir(Userspace<char const*> user_path, size_t path_length)
+ErrorOr<FlatPtr> Process::chdir_impl(StringView path)
 {
-    VERIFY_NO_PROCESS_BIG_LOCK(this);
-    TRY(require_promise(Pledge::rpath));
-    auto path = TRY(get_syscall_path_argument(user_path, path_length));
-
-    RefPtr<Custody> new_directory = TRY(VirtualFileSystem::open_directory(vfs_root_context(), credentials(), path->view(), current_directory()));
+    RefPtr<Custody> new_directory = TRY(VirtualFileSystem::open_directory(vfs_root_context(), credentials(), path, current_directory()));
     m_current_directory.with([&](auto& current_directory) {
         // NOTE: We use swap() here to avoid manipulating the ref counts while holding the lock.
         swap(current_directory, new_directory);
@@ -25,10 +21,16 @@ ErrorOr<FlatPtr> Process::sys$chdir(Userspace<char const*> user_path, size_t pat
     return 0;
 }
 
-ErrorOr<FlatPtr> Process::sys$fchdir(int fd)
+ErrorOr<FlatPtr> Process::sys$chdir(Userspace<char const*> user_path, size_t path_length)
 {
     VERIFY_NO_PROCESS_BIG_LOCK(this);
-    TRY(require_promise(Pledge::stdio));
+    TRY(require_promise(Pledge::rpath));
+    auto path = TRY(get_syscall_path_argument(user_path, path_length));
+    return chdir_impl(path->view());
+}
+
+ErrorOr<FlatPtr> Process::fchdir_impl(int fd)
+{
     auto description = TRY(open_file_description(fd));
     if (!description->is_directory())
         return ENOTDIR;
@@ -38,6 +40,13 @@ ErrorOr<FlatPtr> Process::sys$fchdir(int fd)
         current_directory = description->custody();
     });
     return 0;
+}
+
+ErrorOr<FlatPtr> Process::sys$fchdir(int fd)
+{
+    VERIFY_NO_PROCESS_BIG_LOCK(this);
+    TRY(require_promise(Pledge::stdio));
+    return fchdir_impl(fd);
 }
 
 ErrorOr<FlatPtr> Process::sys$getcwd(Userspace<char*> buffer, size_t size)
