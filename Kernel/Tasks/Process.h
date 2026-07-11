@@ -752,7 +752,13 @@ private:
 
     ErrorOr<Memory::VirtualRange> remap_range_as_stack(FlatPtr address, size_t size);
 
+    enum class OpenFileDescriptionInstallMode {
+        EmptySlot,
+        Replace,
+    };
+
     ErrorOr<NonnullRefPtr<OpenFileDescription>> open_file_description_for_path_impl(int dirfd, StringView path, int options, mode_t mode);
+    ErrorOr<FlatPtr> install_open_file_description_at_fd_impl(int fd, NonnullRefPtr<OpenFileDescription>, u32 fd_flags, OpenFileDescriptionInstallMode);
     ErrorOr<FlatPtr> open_impl(Userspace<Syscall::SC_open_params const*>);
     ErrorOr<FlatPtr> open_impl(int dirfd, StringView path, int options, mode_t mode);
     ErrorOr<FlatPtr> open_at_fd_impl(int fd, int dirfd, StringView path, int options, mode_t mode);

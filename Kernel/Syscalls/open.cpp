@@ -31,34 +31,37 @@ ErrorOr<FlatPtr> Process::open_impl(int dirfd, StringView path, int options, mod
 
     auto fd_allocation = TRY(allocate_fd());
     auto description = TRY(open_file_description_for_path_impl(dirfd, path, options, mode));
+    u32 fd_flags = (options & O_CLOEXEC) ? FD_CLOEXEC : 0;
+    return install_open_file_description_at_fd_impl(fd_allocation.fd, move(description), fd_flags, OpenFileDescriptionInstallMode::EmptySlot);
+}
 
+ErrorOr<FlatPtr> Process::install_open_file_description_at_fd_impl(int fd, NonnullRefPtr<OpenFileDescription> description, u32 fd_flags, OpenFileDescriptionInstallMode install_mode)
+{
     return m_fds.with_exclusive([&](auto& fds) -> ErrorOr<FlatPtr> {
-        u32 fd_flags = (options & O_CLOEXEC) ? FD_CLOEXEC : 0;
-        fds[fd_allocation.fd].set(move(description), fd_flags);
-        return fd_allocation.fd;
+        if (fd < 0 || static_cast<size_t>(fd) >= fds.max_open())
+            return EINVAL;
+
+        if (fds.m_fds_metadatas[fd].is_allocated()) {
+            if (auto* old_description = fds[fd].description()) {
+                if (install_mode == OpenFileDescriptionInstallMode::EmptySlot)
+                    return EINVAL;
+                (void)old_description->close();
+                fds[fd].clear();
+            }
+        } else {
+            fds.m_fds_metadatas[fd].allocate();
+        }
+
+        fds[fd].set(move(description), fd_flags);
+        return fd;
     });
 }
 
 ErrorOr<FlatPtr> Process::open_at_fd_impl(int fd, int dirfd, StringView path, int options, mode_t mode)
 {
     auto description = TRY(open_file_description_for_path_impl(dirfd, path, options, mode));
-
-    return m_fds.with_exclusive([&](auto& fds) -> ErrorOr<FlatPtr> {
-        if (fd < 0 || static_cast<size_t>(fd) >= fds.max_open())
-            return EINVAL;
-
-        if (fds.m_fds_metadatas[fd].is_allocated()) {
-            if (auto* old_description = fds[fd].description())
-                (void)old_description->close();
-            fds[fd].clear();
-        } else {
-            fds.m_fds_metadatas[fd].allocate();
-        }
-
-        u32 fd_flags = (options & O_CLOEXEC) ? FD_CLOEXEC : 0;
-        fds[fd].set(move(description), fd_flags);
-        return fd;
-    });
+    u32 fd_flags = (options & O_CLOEXEC) ? FD_CLOEXEC : 0;
+    return install_open_file_description_at_fd_impl(fd, move(description), fd_flags, OpenFileDescriptionInstallMode::Replace);
 }
 
 ErrorOr<FlatPtr> Process::open_impl(Userspace<Syscall::SC_open_params const*> user_params)
