@@ -119,7 +119,6 @@ ErrorOr<FlatPtr> Process::sys$posix_spawn(Userspace<Syscall::SC_posix_spawn_para
         return ENOTSUP;
     }
 
-    // Copy file actions buffer from userspace
     OwnPtr<KBuffer> file_actions_buffer;
     if (params.serialized_file_actions_data.ptr() != 0 && params.serialized_file_actions_data_size != 0) {
 
@@ -176,7 +175,6 @@ ErrorOr<FlatPtr> Process::sys$posix_spawn(Userspace<Syscall::SC_posix_spawn_para
         // FIXME: Support FD_CLOFORK.
     }));
 
-    // Execute file actions on the child's FD table
     if (file_actions_buffer) {
         TRY(child->execute_file_actions(file_actions_buffer->bytes()));
     }

@@ -299,7 +299,6 @@ int posix_spawnp(pid_t* out_pid, char const* file, posix_spawn_file_actions_t co
         posix_spawn_child(file, file_actions, attr, argv, envp, execvpe);
     }
 
-    // Use posix_spawn which handles the syscall path
     // FIXME: This is currently not OOM-safe because ByteString does not handle OOMs!
     ByteString path = getenv("PATH");
     if (path.is_empty())
@@ -324,8 +323,6 @@ int posix_spawn_file_actions_addchdir(posix_spawn_file_actions_t* actions, char 
 {
     size_t path_len = strlen(path);
     size_t record_size = sizeof(Kernel::SpawnFileActionChdir) + path_len + 1;
-
-    record_size = align_up_to(record_size, Kernel::SPAWN_FILE_ACTION_ALIGNMENT);
 
     auto buffer_or_error = ByteBuffer::create_uninitialized(record_size);
     if (buffer_or_error.is_error())
@@ -412,8 +409,6 @@ int posix_spawn_file_actions_addopen(posix_spawn_file_actions_t* actions, int wa
 {
     size_t path_len = strlen(path);
     size_t record_size = sizeof(Kernel::SpawnFileActionOpen) + path_len + 1;
-
-    record_size = align_up_to(record_size, Kernel::SPAWN_FILE_ACTION_ALIGNMENT);
 
     auto buffer_or_error = ByteBuffer::create_uninitialized(record_size);
     if (buffer_or_error.is_error())

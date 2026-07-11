@@ -6,8 +6,6 @@
 
 #pragma once
 
-#include <AK/Array.h>
-#include <AK/StdLibExtras.h>
 #include <AK/Traits.h>
 #include <AK/Types.h>
 #include <Kernel/API/POSIX/sys/types.h>
@@ -55,17 +53,6 @@ struct SpawnFileActionFchdir {
     SpawnFileActionHeader header;
     int fd;
 };
-
-union SpawnFileActionUnion {
-    SpawnFileActionHeader header;
-    SpawnFileActionDup2 dup2;
-    SpawnFileActionOpen open;
-    SpawnFileActionClose close;
-    SpawnFileActionChdir chdir;
-    SpawnFileActionFchdir fchdir;
-};
-
-constexpr size_t SPAWN_FILE_ACTION_ALIGNMENT = alignof(SpawnFileActionUnion);
 
 }
 
